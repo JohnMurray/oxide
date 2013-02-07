@@ -1,0 +1,103 @@
+#!/bin/bash
+
+##
+## DEFINE USEFUL CONSTANTS
+##
+
+BASE_DIR="$(dirname ${BASH_SOURCE[0]})/.."
+BIN_DIR="${BASE_DIR}/bin"
+
+RUST_REPO="git://github.com/mozilla/rust"
+RUST_BRANCH="incoming"
+REPO_TEMP_DIR='/tmp'
+REPO_TEMP_NAME='rust'
+
+# Set the current rust version (if it is installed on
+# the system)
+CURR_RUST_VERSION='-1'
+if [ -e "${BIN_DIR}/rustc" ] ; then
+  CURR_RUST_VERSION=`${BIN_DIR}/./rustc -v | head -1 | awk '{print $2;}'`
+  echo $CURR_RUST_VERSION
+  exit 0
+else
+  echo "ohh no"
+  echo "${BIN_DIR}/rustc"
+  exit 1
+fi
+
+
+
+##
+## DEFINE USEFUL FUNCTION(S)
+##
+
+
+# Evaluate a floating point number expression.
+function float_eval()
+{
+    local stat=0
+    local result=0.0
+    if [[ $# -gt 0 ]]; then
+        result=$(echo "scale=$float_scale; $*" | bc -q 2>/dev/null)
+        stat=$?
+        if [[ $stat -eq 0  &&  -z "$result" ]]; then stat=1; fi
+    fi
+    echo $result
+    return $stat
+}
+
+
+# Evaluate a floating point number conditional expression.
+function float_cond()
+{
+    local cond=0
+    if [[ $# -gt 0 ]]; then
+        cond=$(echo "$*" | bc -q 2>/dev/null)
+        if [[ -z "$cond" ]]; then cond=0; fi
+        if [[ "$cond" != 0  &&  "$cond" != 1 ]]; then cond=0; fi
+    fi
+    local stat=$((cond == 0))
+    return $stat
+}
+
+
+
+##
+## START OF SCRIPTS
+##
+
+# prepare and use a temporary directory to checkout the
+# git repo or use what is already there
+pushd $REPO_TEMP_DIR
+if [ -e $REPO_TEMP_NAME ] ; then
+  if [ -d $REPO_TEMP_NAME ] && [ -e "${REPO_TEMP_NAME}/.git" ] ; then
+    cd $REPO_TEMP_NAME
+  else
+    rm -rf $REPO_TEMP_NAME
+    git clone $RUST_REPO $REPO_TEMP_NAME
+    cd $REPO_TEMP_NAME
+  fi
+fi
+
+# make sure that we have the latest copy
+git checkout $RUST_BRANCH
+git pull origin $RUST_BRANCH
+
+# ensure that, if we are doing and update, that we are
+# getting a _more_ up-to-date version.
+# 
+# Note: Since rust only uses primary and secondary versioning
+#       numbers, I'm going to treat them like floats in my
+#       calculations.
+NEW_RUST_VERSION=`cat Makefile.in | grep -i 'cfg_release' | awk '{print $3;}'`
+if float_cond '${CURR_RUST_VERSION} = ${NEW_RUST_VERSION}' ; then
+  exit 0
+fi
+
+
+# build the source and install
+./configure --prefix=$BIN_DIR
+make && make test && make install
+
+#return to the current directory
+popd
